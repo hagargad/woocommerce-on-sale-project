@@ -1,14 +1,14 @@
 <?php
 /**
- * Plugin Name: WooCommerce On Sale Filter
+ * Plugin Name: On Sale Filter
  * Plugin URI: https://hagarhosny.com.co/woocommerce-on-sale-filter
  * Description: Adds a filter dropdown to filter WooCommerce products by sale status (on sale or not on sale)
  * Version: 1.0.0
- * Author: hagar gad
+ * Author: Hagar Hosny
  * Author URI: https://hagarhosny.com.co/
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain: woo-sale-filter
+ * Text Domain: on-sale-filter
  * Domain Path: /languages
  * Requires at least: 5.0
  * Requires PHP: 7.2
@@ -35,7 +35,7 @@ function woo_sale_filter_check_woocommerce() {
 function woo_sale_filter_woocommerce_notice() {
     ?>
     <div class="error">
-        <p><?php _e('WooCommerce On Sale Filter requires WooCommerce to be installed and active.', 'woo-sale-filter'); ?></p>
+        <p><?php esc_html_e('On Sale Filter requires WooCommerce to be installed and active.', 'on-sale-filter'); ?></p>
     </div>
     <?php
 }
@@ -43,7 +43,7 @@ function woo_sale_filter_woocommerce_notice() {
 // Plugin activation hook
 function woo_sale_filter_activation() {
     if (!woo_sale_filter_check_woocommerce()) {
-        wp_die(__('This plugin requires WooCommerce to be installed and active.', 'woo-sale-filter'));
+        wp_die(esc_html__('This plugin requires WooCommerce to be installed and active.', 'on-sale-filter'));
     }
 }
 register_activation_hook(__FILE__, 'woo_sale_filter_activation');
@@ -62,15 +62,15 @@ function woo_sale_filter_dropdown($output) {
     
     $output .= '
         <select id="dropdown_product_sale" name="product_sale">
-            <option value="">' . esc_html__('Filter by sale', 'woo-sale-filter') . '</option>
-            <option value="1" ' . selected($selected, 1, false) . '>' . esc_html__('On sale', 'woo-sale-filter') . '</option>
-            <option value="2" ' . selected($selected, 2, false) . '>' . esc_html__('Not on sale', 'woo-sale-filter') . '</option>
+            <option value="">' . esc_html__('Filter by sale', 'on-sale-filter') . '</option>
+            <option value="1" ' . selected($selected, 1, false) . '>' . esc_html__('On sale', 'on-sale-filter') . '</option>
+            <option value="2" ' . selected($selected, 2, false) . '>' . esc_html__('Not on sale', 'on-sale-filter') . '</option>
         </select>
     ';
  
     return $output;
 }
-add_action('woocommerce_product_filters', 'woo_sale_filter_dropdown');
+add_filter('woocommerce_product_filters', 'woo_sale_filter_dropdown');
 
 /**
  * Modify the WHERE clause to filter products by sale status
@@ -78,27 +78,39 @@ add_action('woocommerce_product_filters', 'woo_sale_filter_dropdown');
 function woo_sale_filter_where_statement($where) {
     global $wpdb, $pagenow;
  
-    // Get selected value
+    // Get selected value.
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Reading a URL parameter from WooCommerce's own admin list-table filter form, which does not include a nonce.
     $selected = filter_input(INPUT_GET, 'product_sale', FILTER_VALIDATE_INT);
-    
-    // Only trigger in admin on products page when filter is selected
-    if (!is_admin() || $pagenow !== 'edit.php' || !isset($_GET['post_type']) || $_GET['post_type'] !== 'product' || !$selected) {
+
+    // Only trigger in admin on products page when filter is selected.
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Same as above: no nonce on WooCommerce's built-in list-table filter form.
+    $post_type = isset( $_GET['post_type'] ) ? sanitize_key( $_GET['post_type'] ) : '';
+    if (!is_admin() || $pagenow !== 'edit.php' || $post_type !== 'product' || !$selected) {
         return $where;
     }
- 
-    // Query to get all product IDs that have a sale price
-    $querystr = $wpdb->prepare(
-        "SELECT p.ID, p.post_parent
-        FROM {$wpdb->posts} p
-        INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
-        WHERE pm.meta_key = %s 
-        AND pm.meta_value != %s
-        AND pm.meta_value IS NOT NULL",
-        '_sale_price',
-        ''
-    );
-    
-    $pageposts = $wpdb->get_results($querystr, OBJECT);
+
+    // Retrieve sale product IDs from cache or query the database.
+    $cache_key  = 'woo_sale_filter_product_ids';
+    $cache_group = 'woo_sale_filter';
+    $pageposts  = wp_cache_get( $cache_key, $cache_group );
+
+    if ( false === $pageposts ) {
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- No WP/WooCommerce API covers this cross-table sale-price lookup; result is cached immediately below.
+        $pageposts = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT p.ID, p.post_parent
+                FROM {$wpdb->posts} p
+                INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
+                WHERE pm.meta_key = %s
+                AND pm.meta_value != %s
+                AND pm.meta_value IS NOT NULL",
+                '_sale_price',
+                ''
+            ),
+            OBJECT
+        );
+        wp_cache_set( $cache_key, $pageposts, $cache_group, HOUR_IN_SECONDS );
+    }
     
     if (empty($pageposts)) {
         // If no products on sale, handle accordingly
@@ -129,11 +141,4 @@ function woo_sale_filter_where_statement($where) {
 }
 add_filter('posts_where', 'woo_sale_filter_where_statement');
 
-/**
- * Load plugin text domain for translations
- */
-function woo_sale_filter_load_textdomain() {
-    load_plugin_textdomain('woo-sale-filter', false, dirname(plugin_basename(__FILE__)) . '/languages');
-}
-add_action('plugins_loaded', 'woo_sale_filter_load_textdomain');
 ?>
